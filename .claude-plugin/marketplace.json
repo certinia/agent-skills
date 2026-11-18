@@ -9,13 +9,32 @@
         "version": "1.0.0"
     },
     "plugins": [
+         {
+            "name": "cscloud-onboarding",
+            "description": "A collection of skills for account onboarding in Certina CS Cloud",
+            "source": "./",
+            "strict": "false",
+            "skills": [
+                "./skills/csc-onboarding-kickoff"
+            ]
+        },
+         {
+            "name": "fmcloud-month-end",
+            "description": "A collection of skills for month-end process in Certina FM Cloud",
+            "source": "./",
+            "strict": "false",
+            "skills": [
+                "./skills/certinia-month-end-close"
+            ]
+        },
         {
             "name": "pscloud-project-manager",
             "description": "A collection of skills for project managers using Certinia PS Cloud",
             "source": "./",
             "strict": "false",
             "skills": [
-                "./skills/portfolio-risk-review"
+                "./skills/portfolio-risk-review",
+                "./skills/project-status-update"
             ]
         },
         {
