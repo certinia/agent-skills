@@ -1,0 +1,31 @@
+{
+    "name": "certinia-agent-skills",
+    "owner": {
+        "name": "Certinia",
+        "email": "pending"
+    },
+    "metadata": {
+        "description": "Certinia Agent Skills",
+        "version": "1.0.0"
+    },
+    "plugins": [
+        {
+            "name": "pscloud-project-manager",
+            "description": "A collection of skills for project managers using Certinia PS Cloud",
+            "source": "./",
+            "strict": "false",
+            "skills": [
+                "./skills/portfolio-risk-review"
+            ]
+        },
+        {
+            "name": "pscloud-resource",
+            "description": "A collection of skills for Resources/Consultants using Certinia PS Cloud",
+            "source": "./",
+            "strict": "false",
+            "skills": [
+                "./skills/timecard-assistant"
+            ]
+        }
+    ]
+}
