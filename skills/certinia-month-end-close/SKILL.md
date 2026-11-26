@@ -1,5 +1,5 @@
 ---
-name: certinia-month-end-close
+name: "certinia-month-end-close"
 description: Runs month-end close in Certinia Accounting (c2g / FinancialForce) through a Salesforce connector that exposes the c2g actions. Checks period state, sweeps unposted (In Progress) journals, sales invoices, sales credit notes, payable invoices, payable credit notes and cash entries, then posts, discards, cancels or reverses them, and finishes with a close-readiness verdict. Use this whenever the user mentions month end, period close, closing the books, closing a period, unposted or in-progress or draft documents, posting journals, accruals and reversals, cleaning up before close, or asks whether a period is ready to close, even if they never say "c2g", "Certinia" or "FFA".
 ---
 
@@ -7,7 +7,7 @@ description: Runs month-end close in Certinia Accounting (c2g / FinancialForce) 
 
 This skill helps an accountant get a company and period from "open and messy" to "ready to close". It reads a lot, writes carefully, and always says what it did and what is still blocking the close.
 
-It relies on a Salesforce connector, **Certinia** that exposes these Certinia actions: `c2g_Find`, `c2g_PostDocuments`, `c2g_DiscardDocuments`, `c2g_CancelDocuments` and `c2g_ReverseDocuments`, plus a SOQL query tool for reads. Tool names carry a connector-specific prefix; check the tool list to find them. If any of the c2g actions or the query tool is missing, say which, and do only the read-only parts. Verified queries are in `references/queries.md`; read it before writing SOQL.
+It relies on a Salesforce connector that exposes these Certinia actions: `c2g_Find`, `c2g_PostDocuments`, `c2g_DiscardDocuments`, `c2g_CancelDocuments` and `c2g_ReverseDocuments`, plus a SOQL query tool for reads. Tool names carry a connector-specific prefix; check the tool list to find them. If any of the c2g actions or the query tool is missing, say which, and do only the read-only parts. Verified queries are in the **Queries** section at the end of this file; use them before writing your own SOQL.
 
 ## Ground rules
 
@@ -27,7 +27,7 @@ It relies on a Salesforce connector, **Certinia** that exposes these Certinia ac
 Confirm company and period. Fetch the period and report its state: open, soft closed (`c2g__SoftClose__c`, which blocks everything except journals), or closed (`c2g__Closed__c`). If the period is already closed, stop and say so; nothing can be posted to it. Also ask whether the user follows a close checklist or calendar they'd like you to work from; if so, use it as the frame for the summary, but don't assume one exists.
 
 ### 2. Unposted-document sweep
-For the chosen company, query all six document types for status `In Progress` (queries in the reference file), in parallel. Don't filter to the target period in the query; pull everything In Progress for the company and bucket it in the next step, because stale and misdated documents are exactly what needs surfacing. Journals can also be `Ready To Post`; list those separately, since they are queued rather than posted.
+For the chosen company, query all six document types for status `In Progress` (see Queries: unposted sweeps), in parallel. Don't filter to the target period in the query; pull everything In Progress for the company and bucket it in the next step, because stale and misdated documents are exactly what needs surfacing. Journals can also be `Ready To Post`; list those separately, since they are queued rather than posted.
 
 ### 3. Triage
 Put each In Progress document in one bucket:
@@ -63,8 +63,8 @@ Show the proposed list for one action: document name, type, date, amount, and wh
 ### 5. Validate
 After acting, confirm the books are sound:
 - Re-run the sweep: nothing should remain In Progress in the target period except items the user chose to leave.
-- Run the trial-balance integrity check (reference file): net home value for the period must be 0 for each company.
-- Look at the journals in the period by type and status (reference file). Recurring month-end work leaves recognisable journals, for example revenue recognition, fixed asset depreciation, currency revaluation, cost amortization, prepaid expenses, and intercompany eliminations (journals owned by an elimination company, `c2g__EliminationCompany__c` = true). If the user expects one of these and none is posted, say so; it may not have been run, or it may be sitting unposted.
+- Run the trial-balance integrity check (see Queries): net home value for the period must be 0 for each company.
+- Look at the journals in the period by type and status (see Queries). Recurring month-end work leaves recognisable journals, for example revenue recognition, fixed asset depreciation, currency revaluation, cost amortization, prepaid expenses, and intercompany eliminations (journals owned by an elimination company, `c2g__EliminationCompany__c` = true). If the user expects one of these and none is posted, say so; it may not have been run, or it may be sitting unposted.
 
 ### 6. Verdict
 End with a go/no-go on closing the period, using the template below. Hard blockers: the period is already closed, any non-zero trial-balance net, documents still In Progress or Ready To Post in the period that the user hasn't chosen to leave, or an expected recurring journal that hasn't been posted. Anything else is a note, not a blocker.
@@ -95,3 +95,113 @@ Verdict: READY TO CLOSE | NOT READY, <one-line reason>
 ## Style
 
 Talk like a colleague in the finance team: plain, specific, no ceremony. Use document numbers and amounts, not "some documents". When you're unsure what the user intends with an accounting action, ask one question; a wrong post is expensive and a question is cheap.
+
+## Queries
+
+These use standard Certinia Accounting objects and fields only. Run them with the connector's SOQL query tool. Replace `{Company}` and `{YYYY/MMM}` with real values. Always filter by company as well as period, because period names repeat across companies. If a query fails on a field, run a schema describe on that object and adapt; field availability can vary with package version and enabled features.
+
+### Companies and periods
+
+```sql
+SELECT Id, Name, c2g__EliminationCompany__c FROM c2g__codaCompany__c
+```
+
+```sql
+SELECT Id, Name, c2g__StartDate__c, c2g__EndDate__c, c2g__Closed__c, c2g__SoftClose__c,
+       c2g__AR__c, c2g__AP__c, c2g__Cash__c
+FROM c2g__codaPeriod__c
+WHERE c2g__OwnerCompany__r.Name = '{Company}' AND c2g__EndDate__c <= {YYYY-MM-DD}
+ORDER BY c2g__EndDate__c DESC LIMIT 6
+```
+
+`c2g__Closed__c` is final close; `c2g__SoftClose__c` blocks everything except journals. `c2g__AR__c`, `c2g__AP__c` and `c2g__Cash__c` close individual GLA groups.
+
+### Unposted sweeps (run all six in parallel)
+
+Status is `In Progress` for every type; the status field name differs by type. None of these filter on period, on purpose: triage buckets by period.
+
+Journals:
+```sql
+SELECT Id, Name, c2g__Type__c, c2g__JournalStatus__c, c2g__JournalDate__c, c2g__Period__r.Name,
+       c2g__JournalDescription__c, c2g__Debits__c, c2g__Credits__c, c2g__LineCount__c,
+       c2g__AutoReverseJournal__c
+FROM c2g__codaJournal__c
+WHERE c2g__JournalStatus__c IN ('In Progress','Ready To Post') AND c2g__OwnerCompany__r.Name = '{Company}'
+ORDER BY c2g__JournalDate__c DESC
+```
+Credits are stored negative. Journals with `c2g__LineCount__c` = 0 are empty shells. Only `In Progress` journals can be posted or discarded with the c2g actions; `Ready To Post` ones are queued for posting and should be reported, not acted on.
+
+Sales invoices:
+```sql
+SELECT Id, Name, c2g__InvoiceDate__c, c2g__InvoiceTotal__c, c2g__Account__r.Name, c2g__Period__r.Name
+FROM c2g__codaInvoice__c
+WHERE c2g__InvoiceStatus__c = 'In Progress' AND c2g__OwnerCompany__r.Name = '{Company}'
+```
+
+Sales credit notes:
+```sql
+SELECT Id, Name, c2g__CreditNoteDate__c, c2g__CreditNoteTotal__c, c2g__Account__r.Name, c2g__Period__r.Name
+FROM c2g__codaCreditNote__c
+WHERE c2g__CreditNoteStatus__c = 'In Progress' AND c2g__OwnerCompany__r.Name = '{Company}'
+```
+
+Payable invoices:
+```sql
+SELECT Id, Name, c2g__InvoiceDate__c, c2g__InvoiceTotal__c, c2g__AccountInvoiceNumber__c,
+       c2g__Account__r.Name, c2g__Period__r.Name
+FROM c2g__codaPurchaseInvoice__c
+WHERE c2g__InvoiceStatus__c = 'In Progress' AND c2g__OwnerCompany__r.Name = '{Company}'
+```
+
+Payable credit notes:
+```sql
+SELECT Id, Name, c2g__CreditNoteDate__c, c2g__CreditNoteTotal__c, c2g__Account__r.Name, c2g__Period__r.Name
+FROM c2g__codaPurchaseCreditNote__c
+WHERE c2g__CreditNoteStatus__c = 'In Progress' AND c2g__OwnerCompany__r.Name = '{Company}'
+```
+
+Cash entries:
+```sql
+SELECT Id, Name, c2g__Type__c, c2g__Date__c, c2g__Reference__c, c2g__Period__r.Name
+FROM c2g__codaCashEntry__c
+WHERE c2g__Status__c = 'In Progress' AND c2g__OwnerCompany__r.Name = '{Company}'
+```
+This query has no amount; if the user needs amounts, query `c2g__codaCashEntryLineItem__c` for the entry. Documents dated in the future do occur, so compare each document's period and date against the target period rather than assuming everything In Progress belongs to it.
+
+### Reversal pre-check
+
+Run this on the journal Ids before calling `c2g_ReverseDocuments`:
+```sql
+SELECT Id, Name, c2g__JournalStatus__c, c2g__Type__c, c2g__AutoReverseJournal__c,
+       c2g__ReversingJournal__c, c2g__CanceledJournal__c, c2g__Period__r.Name, c2g__JournalDate__c
+FROM c2g__codaJournal__c WHERE Id IN ('{id1}','{id2}')
+```
+Safe to reverse only when status is Complete, `AutoReverseJournal` is false, `ReversingJournal` is null and `CanceledJournal` is false.
+
+After reversing, check the new document the same way, using the Id the action returned. `c2g__SourceJournal__c` and `c2g__OriginalJournal__c` link reversing and cancelling journals back to their source.
+
+### Trial balance integrity check
+
+Net home value of all transaction lines in a period must be zero, per company:
+```sql
+SELECT c2g__OwnerCompany__r.Name co, SUM(c2g__HomeValue__c) net, COUNT(Id) n
+FROM c2g__codaTransactionLineItem__c
+WHERE c2g__Transaction__r.c2g__Period__r.Name = '{YYYY/MMM}'
+GROUP BY c2g__OwnerCompany__r.Name
+```
+Any non-zero `net` for a company is a hard blocker. Treat floating-point noise (for example 1e-12) as zero. A period with no transactions returns no rows, which is not a pass; report "no activity" instead.
+
+### Journals by type
+
+```sql
+SELECT c2g__Type__c, c2g__JournalStatus__c, COUNT(Id) n, SUM(c2g__Debits__c) debits
+FROM c2g__codaJournal__c
+WHERE c2g__Period__r.Name = '{YYYY/MMM}' AND c2g__OwnerCompany__r.Name = '{Company}'
+GROUP BY c2g__Type__c, c2g__JournalStatus__c
+```
+Standard journal types include Manual Journal, Revenue Recognition Journal, Revenue Recognition True Up Journal, Fixed Asset Acquisition / Depreciation / Disposal Journal, Currency Revaluation Journal, Cost Amortization Journal, Prepaid Expenses Journal, Income Schedule, Reversing Journal, Cancelling Journal, Cash Matching Journal and Year End Journal. Which of these exist depends on the Certinia products installed. Journal statuses: In Progress, Ready To Post, Complete, Discarded.
+
+### Notes
+
+- `c2g_Find` takes exact record names (for example a journal `JNL000288` or sales invoice `SIN000444`) and returns the Id. Number formats vary by org configuration.
+- Sweep queries can return many rows in a busy company. Add a `LIMIT` if needed and tell the user the list is truncated.
